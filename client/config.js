@@ -1,7 +1,7 @@
 const Cache = require("./cache.js")
 const Wallet = require('./wallet.js')
 
-/** 
+/**
  * @param Opts {Object}
  */
 class Config {
@@ -15,7 +15,7 @@ class Config {
     // web3,
     // eac,
     // provider,
-    // walletFile,
+    // walletStore,
     // password,
     // autostart
   ) {
@@ -55,7 +55,7 @@ class Config {
 
   }
 
-  static async create(
+  static create(
     opts
     // scanSpread,
     // logfile,
@@ -65,17 +65,18 @@ class Config {
     // web3,
     // eac,
     // provider,
-    // walletFile,
+    // walletStore,
     // password,
     // autostart
   ) {
     let conf = new Config(opts)
-    if (opts.walletFile) {
-      if (typeof opts.walletFile === "string" || typeof opts.walletFile === Object) {
-        conf.wallet = new Wallet(opts.web3)
-        conf.wallet.decryptA(opts.walletFile, opts.password)
+    if (opts.walletStore ) {
+      if (typeof opts.walletStore === 'object') {
+        opts.walletStore = JSON.stringify(opts.walletStore);
       }
-    } else {
+      conf.wallet = new Wallet(opts.web3)
+      conf.wallet.decrypt([opts.walletStore], opts.password)
+    } else  {
       conf.wallet = false
     }
     return conf

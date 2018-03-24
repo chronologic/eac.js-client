@@ -1,13 +1,16 @@
 const assert = require('chai').assert
-const BigNumber = require("bignumber.js")
-const scanning = require('../client/scanning')
+const BigNumber = require('bignumber.js')
+const { Scanner } = require('../client/scanner')
 const Cache = require('../client/cache')
-let eac = require("eac.js-lib")()
+const eac = require('eac.js-lib')()
+
+const RequestFactoryMock = require('./helpers/RequestFactoryMock')
+const RequestTrackerMock = require('./helpers/RequestTrackerMock')
 
 const tx = [
-  "0x47863b9E8C590323768E4352A78Ca759BBd37E8B",
-  "0xE5CDce77122865032Ba5f584eAF393f06a493045",
-  "0x002f7D343c75166856b6459c6a1967969AFc62e7"
+  '0x47863b9E8C590323768E4352A78Ca759BBd37E8B',
+  '0xE5CDce77122865032Ba5f584eAF393f06a493045',
+  '0x002f7D343c75166856b6459c6a1967969AFc62e7',
 ]
 
 class TxRequest {
@@ -22,48 +25,8 @@ class TxRequest {
   get windowStart() {
     return new BigNumber(10)
   }
-}
 
-class RequestTracker {
-  setFactory(address) {
-
-  }
-
-  nextFromLeft(left) {
-    if (++left >= tx.length) return eac.Constants.NULL_ADDRESS
-
-    return tx[left]
-  }
-
-  windowStartFor(address) {
-    return 10
-  }
-
-  nextRequest(address) {
-    let i = tx.findIndex(a => a === address)
-
-    return ++i == tx.length ? eac.Constants.NULL_ADDRESS : tx[i]
-  }
-
-  get address() {
-    return "{tracker address}"
-  }
-}
-
-class RequestFactory {
-  setFactory(address) {
-
-  }
-
-  nextFromLeft(left) {
-
-  }
-
-  get address() {
-    return "{factory address}"
-  }
-
-  isKnownRequest(address) {
+  beforeClaimWindow() {
     return true
   }
 }
@@ -76,26 +39,86 @@ const logger = {
 }
 
 describe('Scanning', () => {
-  describe('#scan()', () => {
+  const conf = {
+    logger,
+    tracker: new RequestTrackerMock(tx),
+    factory: new RequestFactoryMock(),
+    eac,
+    cache: new Cache(logger),
+    web3: {
+      exists: true,
+      version: {
+        getNetwork(){
+          return (null,42);
+        }
+      }
+    },
+    provider: 'provider',
+    scanSpread: 100
+  }
+
+  const scanner = new Scanner(100, conf)
+
+  describe('#getWindowForBlock', () => {
+    it('should calculate window for blocks', () => {
+      const latest = 1000
+      const expectedLeft = 1000 - conf.scanSpread
+      const expectedRight = 1000 + conf.scanSpread
+
+      const { leftBlock, rightBlock } = scanner.getWindowForBlock(latest)
+
+      assert.equal(expectedLeft, leftBlock)
+      assert.equal(expectedRight, rightBlock)
+    })
+  })
+
+  describe('#getRightTimestamp', () => {
+    it('should calculate right bound of scanning window', () => {
+      const getRightTimestamp = (leftTimestamp, latestTimestamp) => {
+        const avgBlockTime = Math.floor((latestTimestamp - leftTimestamp) / conf.scanSpread)
+        const rightTimestamp = Math.floor(leftTimestamp + (avgBlockTime * conf.scanSpread * 2))
+
+        return rightTimestamp
+      }
+
+      const left = 1000000
+      const latest = left + 1000 * 15
+      const expectedRight = 2 * latest - left
+      const expectedRightOldImpl = getRightTimestamp(left, latest)
+
+      const right = scanner.getRightTimestamp(left, latest)
+
+      assert.equal(expectedRight, right)
+      assert.equal(expectedRightOldImpl, right)
+    })
+
+  })
+
+  describe('#scanTimeStamps()', () => {
     eac.transactionRequest = address => new TxRequest(address)
 
-    const { scan } = scanning
-    const conf = {
-      logger,
-      tracker: new RequestTracker(),
-      factory: new RequestFactory(),
-      eac,
-      cache: new Cache(logger)
-    }
-
     it('should cache 2 last transactions', async () => {
-      await scan(conf, 0, 10)
+      await scanner.scanTimeStamps(0, 10)
 
       assert.isFalse(conf.cache.has(tx[0]), `Transaction ${tx[0]} in cache`)
 
       tx.slice(1).map(t => {
         assert.isTrue(conf.cache.has(t), `Transaction ${t} not in cache`)
       })
-    });
-  });
-});
+    })
+  })
+
+  // Unable to run, as it requires an actual web3 instance
+  // describe('#watchBlockchain()', async () => {
+  //   it('should start Request watcher', async () => {
+  //     await scanner.watchBlockchain()
+  //     assert.notEqual(scanner.requestWatcher ,null, `Failed to start Requests watcher`)
+  //   })
+
+  //   it('should stop Request watcher', async () => {
+  //     scanner.requestWatcher.stopWatching( (e,r) => {
+  //       assert.isTrue(r,`Failed to stop watcher`)
+  //     })
+  //   })
+  // })
+})
